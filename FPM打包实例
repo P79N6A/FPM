@@ -1,0 +1,168 @@
+FPM打包实例详解
+一、准备工作
+打包时的文件夹目录准备：
+在自己的home目录下建立文件夹结构
+FPM
+|-- BIPACKAGE
+|   `-- nginx
+|-- RPMS
+|   |-- addops-logstash-dba-5.2.2-1.x86_64.rpm
+|   `-- addops-nginx-1.9.15-8.x86_64.rpm
+|-- SCRIPTS
+|   |-- logstash-post-install.sh
+|   |-- nginx-post-install.sh
+|   `-- nginx-preun.sh
+|-- SOURCES
+|   |-- logstash-5.2.2
+|   |-- nginx-1.9.15
+|   `-- nginx-1.9.15-2
+`-- TARSOURCES
+    |-- addops-logstash-dba-5.2.2.tar.gz
+`-- nginx-1.9.15.tar.gz
+BIPACKAGE文件夹用于存放二进制执行configure、make和make install之后所生成的文件
+RPMS文件夹用于存放生成的RPM包
+SCRIPTS文件夹用于存放执行的脚本
+SOURCES文件夹用于存放源文件夹，fpm执行打包时的工作目录
+TARSOURCES文件夹用于存放用户给的tar压缩包
+改文件夹的结构只是一种建议，可以随便改，没有类似于rpmbuild目录结构的约束。
+二、分文件类型的包打包实例：logstash为例
+1、打包需求：
+(1)压缩包中共有4个文件，其中有三个压缩包，一个conf文件，他们的解压位置如下：
+logstash-etc.tgz 解压到 /etc/目录下
+logstash-usr-shard.tgz 解压到 /usr/share/目录下
+logstash-var-lib.tgz 解压到 /var/lib/目录下
+logstash.conf 拷贝到 /etc/init/目录下 
+(2)生成目录
+mkdir /var/lib/logstash
+mkdir -p /data1/logstash/logs
+mkdir -p /data1/logstash/data
+mkdir -p /data1/logstash/config
+(3)增加用户logstash
+logstash用户在/etc/shadow里的配置为:
+logstash:!!:17677::::::
+logsatsh用户在/etc/passwd里的配置为：
+/sbin/nologin
+(4)权限调整
+chown -R logstash.logstash /var/lib/logstash
+chown -R logstash.logstash /data1/logstash/logs
+chown -R logstash.logstash /data1/logstash/data
+chown -R logstash.logstash /data1/logstash/config
+chown -R logstash.logstash /etc/logstash
+chown -R logstash.logstash /usr/share/logstash
+chown -R logstash.logstash /var/lib/logstash
+
+2、业务人员应该完成部分
+（1）建立要打包文件的顶层目录logstash-5.2.2，可以当成要安装到宿主机的根目录，最终要打包的内容放在该目录下，结构要与在宿主机中相对于根目录的
+结构一致。构建的结果为：
+|-- logstash-5.2.2
+|-- data1
+|-- etc
+|   |-- init
+|   |   `-- logstash.conf
+|   `-- logstash
+|       |-- jvm.options
+|       |-- log4j2.properties
+|       `-- startup.options
+|-- usr
+|   `-- share
+|       `-- logstash
+`-- var
+    `-- lib
+        `-- logstash
+即打包需求人员应该将自己的打包目录做成最终自己想要的结果，文件夹的根目录就可
+以当成宿主机的根目录来操作。
+3、运维人员应该完成部分
+（1）编写脚本：创建用户可以在安装包之前也可以在安装包之后完成，但是修改文件夹权限必须放在安装完包之后，因此为了减少脚本的量，可以将创建用户和修改权限都放在安装完包之后，即只实现一个脚本即可logstash-post-install.sh。
+#!/bin/bash
+useradd logstash
+chown -R logstash.logstash /var/lib/logstash
+chown -R logstash.logstash /data1
+chown -R logstash.logstash /usr/share/logstash
+chown -R logstash.logstash /etc/logstash
+（2）调用fpm命令实现一键打包：
+fpm -s dir -t rpm -f -n  addops-logstash-dba -v 5.2.2 -p ../../RPMS –iteration 2 --post-install ../../SCRIPTS/logstash-post-install.sh ./
+至此，就已经完成了logstash的打包，经测试符合要求。打包人员所花时间不超过5分钟。
+三、二进制类型包打包实例：nginx为例
+1、打包需求：
+将nginx安装到usr/local目录下（参考之前打nginx包需求）
+2、业务人员应该完成部分：
+（1）编译安装包
+所有命令都在source目录下的源码包的文件下执行：
+export PATH=/usr/local/ruby/bin:$PATH
+export LUAJIT_LIB=/usr/local/luajit/lib
+export LUAJIT_INC=/usr/local/luajit/include/luajit-2.0   
+./configure \
+    --prefix=/usr/local/nginx \
+    --error-log-path=/data/nginx/error.log \
+    --pid-path=/var/run/nginx.pid \
+    --lock-path=/var/lock/nginx.lock \
+    --http-log-path=/data/nginx/access.log \
+    --http-client-body-temp-path=/data/nginx/client_body_temp \
+    --http-proxy-temp-path=/data/nginx/proxy_temp \
+    --http-fastcgi-temp-path=/data/nginx/fastcgi_temp \
+    --http-uwsgi-temp-path=/data/nginx/uwsgi_temp \
+    --http-scgi-temp-path=/data/nginx/scgi_temp \
+    --with-http_realip_module \
+    --with-http_addition_module \
+    --with-http_xslt_module \
+    --with-http_image_filter_module \
+    --with-http_geoip_module \
+    --with-http_sub_module \
+    --with-http_dav_module \
+    --with-http_flv_module \
+    --with-http_mp4_module \
+    --with-http_gunzip_module \
+    --with-http_gzip_static_module \
+    --with-http_auth_request_module \
+    --with-http_random_index_module \
+    --with-http_secure_link_module \
+    --with-http_degradation_module \
+    --with-http_slice_module \
+    --with-http_stub_status_module \
+    --with-stream \
+    --with-stream_ssl_module \
+    --with-google_perftools_module \
+    --with-openssl=openssl-1.0.1u \
+    --with-debug \
+    --with-pcre=pcre-8.36 \
+    --with-pcre-jit \
+    --with-ipv6 \
+    --add-module=modules/nginx-upload-module-2.2 \
+    --add-module=modules/nginx-upload-progress-module-master \
+    --add-module=modules/lua-nginx-module-0.10.8 \
+    --add-module=modules/ngx_devel_kit-0.2.19 \
+    --add-module=modules/memc-nginx-module-0.15 \
+    --add-module=modules/srcache-nginx-module-0.28 \
+    --add-module=modules/ngx_http_full_log_module \
+    --add-module=modules/echo-nginx-module-0.50 \
+    --add-module=modules/passenger-5.0.27/src/nginx_module \
+    --add-module=modules/ngx_cache_purge-2.3
+make
+make install DESTDIR=../../BIPACKAGE/nginx
+cp ../BIPACKAGE/nginx/* nginx-1.9.15-2    #将需要打包的内容复制到打包的目录里
+mkdir -p etc/cron.d etc/init.d etc/sysctl.d   #在需要打包的目录里建立目录，根据需求建立
+cp ../nginx-1.9.15/conf/sysctl.conf etc/sysctl.d/nginx  #将源码包中的文件复制到目标文件夹
+cp ../nginx-1.9.15/conf/crontab etc/cron.d/nginx 
+cp ../nginx-1.9.15/init.d/nginx.init etc/init.d/nginx
+
+至此文件夹做好了
+3、运维人员应该完成部分：
+编写执行脚本：
+1、在scripts目录中进行，建立nginx-post-install.sh，在nginx成功安装后的脚本
+#!/bin/bash
+chkconfig --add nginx
+chkconfig nginx on
+sysctl -e -p /etc/sysctl.d/nginx
+
+2、建立nginx-preun.sh，在nginx卸载前执行的脚本
+#!/bin/bash
+test ! -f /var/run/nginx.pid || service nginx stop
+
+3、建立rpm包
+fpm -s dir -t rpm -f -n  addops-nginx -v 1.9.15 -p ../../RPMS --iteration 8 --post-install ../../SCRIPTS/nginx-post-install.sh 
+--pre-uninstall ../../SCRIPTS/nginx-preun.sh ./
+
+四、总结
+通过以上两种打包过程的比较分析。可以看到运维人员的工作时间大大被减少。业务人员需要提供包的结构，该包的结构要与安装到宿主机上所对应的根目录的结
+构一致。即在安装完rpm包之后，该包中的内容将覆盖宿主机根目录下的内容。运维人员的主要工作即对宿主机系统配置的改变，比如增加一个用户、修改文件夹
+权限、添加一个服务等。这些均可以通过使用脚本的方式实现。这样的话，打包有很大希望通过UI界面实现，实现一键打包。
